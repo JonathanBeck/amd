@@ -27,7 +27,6 @@
 # include "config.h"
 #endif
 
-#include <stdio.h>
 #include <epan/packet.h>
 #include <epan/prefs.h>
 #include <epan/dissectors/packet-usb.h>
@@ -54,11 +53,13 @@ static gint ett_amd = -1;
 
 static dissector_handle_t ssl_handle;
 
-static const value_string headertypenames[] = {
-	{ 1, "Long" },
-	{ 2, "Short" },
-	{ 0, NULL }
-};
+#define AMD_SHORT_HEADER_LENGTH 28
+#define AMD_LONG_HEADER_LENGTH 32
+
+#define AMD_VERSION_1 0x00000006
+#define AMD_VERSION_2 0x00000060
+
+#define IS_AMD_PACKET(first_four_bytes) ( (first_four_bytes == AMD_VERSION_1) || (first_four_bytes == AMD_VERSION_2))
 
 void
 proto_register_amd(void)
@@ -156,12 +157,11 @@ dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 	//First check if we are really in the Apple Mobile Device Protocol
 	guint length = tvb_length(tvb);
 
-	if (length >= 28) { //min header size
+	if (length >= SHORT_HEADER_LENGTH) { //min header size
 
 		guint32 version =  tvb_get_ntohl(tvb, 0);
-		static guint32 reference = 0x00000006;
 
-		if ( version == reference) { //if packet begins with 00 00 00 00 60 we assume its AMD packet
+		if ( IS_AMD_PACKET(version) ) { //if packet begins with 00 00 00 00 60 we assume it is an AMD packet
 	
 			if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
 				col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
