@@ -184,9 +184,9 @@ dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 				flen2 =  tvb_get_ntohl(tvb, 24);
 
 				if (0 != flen2)
-					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, 32, FALSE); //long header
+					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_LONG_HEADER_LENGTH, FALSE); //long header
 				else 
-					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, 28, FALSE); //short header
+					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_SHORT_HEADER_LENGTH, FALSE); //short header
 
 				amd_tree = proto_item_add_subtree(ti, ett_amd);
 				proto_tree_add_item(amd_tree, hf_amd_version, tvb, offset, 4, FALSE);
