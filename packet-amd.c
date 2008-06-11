@@ -157,7 +157,7 @@ dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 	//First check if we are really in the Apple Mobile Device Protocol
 	guint length = tvb_length(tvb);
 
-	if (length >= SHORT_HEADER_LENGTH) { //min header size
+	if (length >= AMD_SHORT_HEADER_LENGTH) { //min header size
 
 		guint32 version =  tvb_get_ntohl(tvb, 0);
 
