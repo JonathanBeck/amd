@@ -36,7 +36,7 @@ void proto_register_amd();
 void proto_reg_handoff_amd();
 static void dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree);
 
-
+static int hf_amd_init_ret = -1;
 static int hf_amd_version = -1;
 static int hf_amd_packet_length = -1;
 static int hf_amd_session_id = -1;
@@ -56,16 +56,25 @@ static dissector_handle_t ssl_handle;
 #define AMD_SHORT_HEADER_LENGTH 28
 #define AMD_LONG_HEADER_LENGTH 32
 
+#define AMD_INIT_MSG1 0x00000014
+#define AMD_INIT_MSG2 0x00000001
+#define AMD_INIT_MSG_LENGTH 20
+
 #define AMD_VERSION_1 0x00000006
 #define AMD_VERSION_2 0x00000060
 
-#define IS_AMD_PACKET(first_four_bytes) ( (first_four_bytes == AMD_VERSION_1) || (first_four_bytes == AMD_VERSION_2))
 
 void
 proto_register_amd(void)
 {
 
     static hf_register_info hf[] = {
+	{ &hf_amd_init_ret,
+	  { "Init message return value", "amd.init_ret",
+	  FT_UINT32, BASE_HEX,
+	  NULL, 0x0,
+	  NULL, HFILL }
+	},
 	{ &hf_amd_version,
 	  { "AMD Protocol Version", "amd.version",
 	  FT_UINT32, BASE_DEC,
@@ -151,71 +160,138 @@ proto_reg_handoff_amd(void)
 	}
 }
 
+int is_amd_init_msg(tvbuff_t *tvb)
+{
+	int ret = 0;
+
+	/* First check if size is sufficient */
+	guint length = tvb_length(tvb);
+
+	if (length == AMD_INIT_MSG_LENGTH) {
+		/* Check if this is an initialization msg */
+		gint32 msg1 = 0;
+		gint32 msg2 = 0;
+
+		msg1 = tvb_get_ntohl(tvb, 4);
+		msg2 = tvb_get_ntohl(tvb, 8);
+
+		if ( AMD_INIT_MSG1 == msg1 &&
+			 AMD_INIT_MSG2 == msg2 )
+			ret = 1;
+	}
+	return ret;
+}
+
+int is_amd_packet(tvbuff_t *tvb)
+{
+	int ret = 0;
+
+	/* First check if size is sufficient */
+	guint length = tvb_length(tvb);
+
+	if (length >= AMD_SHORT_HEADER_LENGTH) {
+
+		guint32 version =  tvb_get_ntohl(tvb, 0);
+
+		/* if packet begins with 00 00 00 00 60 we assume it is an AMD packet */
+		if ( (version == AMD_VERSION_1) || (version == AMD_VERSION_2) )
+			ret = 1;
+	}
+	return ret;
+}
+
 static void
 dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
 	//First check if we are really in the Apple Mobile Device Protocol
+	
 	guint length = tvb_length(tvb);
 
-	if (length >= AMD_SHORT_HEADER_LENGTH) { //min header size
+	/* Treat init msg */
+	if ( is_amd_init_msg(tvb) ) {
 
-		guint32 version =  tvb_get_ntohl(tvb, 0);
+		if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
+			col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+		}
+		/* Clear out stuff in the info column */
+		if (check_col(pinfo->cinfo,COL_INFO)) {
+			col_clear(pinfo->cinfo,COL_INFO);
+		}
 
-		if ( IS_AMD_PACKET(version) ) { //if packet begins with 00 00 00 00 60 we assume it is an AMD packet
-	
-			if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
-				col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+		/* we are being asked for details */
+		if (tree) {
+			//try only with short header
+			proto_item *ti = NULL;
+			proto_tree *amd_tree = NULL;
+
+			ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_INIT_MSG_LENGTH, FALSE);
+			amd_tree = proto_item_add_subtree(ti, ett_amd);
+			proto_tree_add_item(amd_tree, hf_amd_init_ret, tvb, 16, 4, FALSE);
+
+		}
+	}
+
+	/* Treat packet */
+	if ( is_amd_packet(tvb) ) {
+
+		if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
+			col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+		}
+		/* Clear out stuff in the info column */
+		if (check_col(pinfo->cinfo,COL_INFO)) {
+			col_clear(pinfo->cinfo,COL_INFO);
+		}
+
+		/* we are being asked for details */
+		if (tree) {
+			//try only with short header
+			proto_item *ti = NULL;
+			proto_tree *amd_tree = NULL;
+
+			tvbuff_t *next_tvb;
+
+			guint offset = 0;
+			guint32 flen;
+			guint32 flen2; //will be used to determine if we are in a short or long header
+
+			flen  =  tvb_get_ntohl(tvb,  4);
+			flen2 =  tvb_get_ntohl(tvb, 24);
+
+			if (0 == flen2 || AMD_SHORT_HEADER_LENGTH == flen)
+				ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_SHORT_HEADER_LENGTH, FALSE); //long header
+			else 
+				ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_LONG_HEADER_LENGTH, FALSE); //short header
+
+			amd_tree = proto_item_add_subtree(ti, ett_amd);
+			proto_tree_add_item(amd_tree, hf_amd_version, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_packet_length, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_session_id, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_self_count, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_other_count, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_operation, tvb, offset, 4, FALSE);
+			offset += 4;
+			proto_tree_add_item(amd_tree, hf_amd_packet_length2, tvb, offset, 4, FALSE);
+			offset += 4;
+			
+			if (!(0 == flen2 || AMD_SHORT_HEADER_LENGTH == flen)){
+
+				proto_tree_add_item(amd_tree, hf_amd_mode, tvb, offset, 2, FALSE);
+				offset += 2;
+				proto_tree_add_item(amd_tree, hf_amd_payload_length, tvb, offset, 2, FALSE);
+				offset += 2;
 			}
-			/* Clear out stuff in the info column */
-			if (check_col(pinfo->cinfo,COL_INFO)) {
-				col_clear(pinfo->cinfo,COL_INFO);
-			}
 
-			if (tree) {
-				//try only with short header
-				proto_item *ti = NULL;
-				proto_tree *amd_tree = NULL;
+			next_tvb = tvb_new_subset(tvb, offset, -1, length);
 
-				tvbuff_t *next_tvb;
+			if (ssl_handle) {
+				guint next_length = tvb_length(next_tvb);
 
-				guint offset = 0;
-				guint32 flen2; //will be used to determine if we are in a short or long header
-
-				flen2 =  tvb_get_ntohl(tvb, 24);
-
-				if (0 != flen2)
-					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_LONG_HEADER_LENGTH, FALSE); //long header
-				else 
-					ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_SHORT_HEADER_LENGTH, FALSE); //short header
-
-				amd_tree = proto_item_add_subtree(ti, ett_amd);
-				proto_tree_add_item(amd_tree, hf_amd_version, tvb, offset, 4, FALSE);
-				offset += 4;
-				proto_tree_add_item(amd_tree, hf_amd_packet_length, tvb, offset, 4, FALSE);
-				offset += 4;
-				proto_tree_add_item(amd_tree, hf_amd_session_id, tvb, offset, 4, FALSE);
-				offset += 4;
-				proto_tree_add_item(amd_tree, hf_amd_self_count, tvb, offset, 4, FALSE);
-				offset += 4;
-				proto_tree_add_item(amd_tree, hf_amd_other_count, tvb, offset, 4, FALSE);
-				offset += 4;
-				proto_tree_add_item(amd_tree, hf_amd_operation, tvb, offset, 4, FALSE);
-				offset += 4;
-
-				
-				if (0 != flen2){
-
-					proto_tree_add_item(amd_tree, hf_amd_packet_length2, tvb, offset, 4, FALSE);
-					offset += 4;
-					proto_tree_add_item(amd_tree, hf_amd_mode, tvb, offset, 2, FALSE);
-					offset += 2;
-					proto_tree_add_item(amd_tree, hf_amd_payload_length, tvb, offset, 2, FALSE);
-					offset += 2;
-				}
-
-				next_tvb = tvb_new_subset(tvb, offset, -1, length);
-
-				if (ssl_handle)
+				if (next_length > 0)
 					call_dissector(ssl_handle, next_tvb, pinfo, tree);
 			}
 		}
