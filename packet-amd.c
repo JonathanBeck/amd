@@ -32,268 +32,298 @@
 #include <epan/dissectors/packet-usb.h>
 
 /* forward reference */
-void proto_register_amd();
-void proto_reg_handoff_amd();
-static void dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree);
+void proto_register_usbmux();
+void proto_reg_handoff_usbmux();
+static void dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree);
 
-static int hf_amd_init_ret = -1;
-static int hf_amd_version = -1;
-static int hf_amd_packet_length = -1;
-static int hf_amd_session_id = -1;
-static int hf_amd_self_count = -1;
-static int hf_amd_other_count = -1;
-static int hf_amd_operation = -1;
-static int hf_amd_packet_length2 = -1;
-static int hf_amd_mode = -1;
-static int hf_amd_payload_length = -1;
+static int hf_usbmux_init_ret = -1;
+static int hf_usbmux_msg_type = -1;
+static int hf_usbmux_packet_length = -1;
+static int hf_usbmux_from_port = -1;
+static int hf_usbmux_to_port = -1;
+static int hf_usbmux_self_count = -1;
+static int hf_usbmux_other_count = -1;
+static int hf_usbmux_offset = -1;
+static int hf_usbmux_flag = -1;
+static int hf_usbmux_window = -1;
+static int hf_usbmux_unknown = -1;
+static int hf_usbmux_packet_length2 = -1;
 
-static int proto_amd = -1;
-static dissector_handle_t amd_handle;
-static gint ett_amd = -1;
+
+
+static int proto_usbmux = -1;
+static dissector_handle_t usbmux_handle;
+static gint ett_usbmux = -1;
 
 static dissector_handle_t ssl_handle;
 
-#define AMD_SHORT_HEADER_LENGTH 28
-#define AMD_LONG_HEADER_LENGTH 32
+#define USBMUX_HEADER_LENGTH 28
+#define USBMUX_TCP_TYPE 0x00000006
 
-#define AMD_INIT_MSG1 0x00000014
-#define AMD_INIT_MSG2 0x00000001
-#define AMD_INIT_MSG_LENGTH 20
+#define USBMUX_INIT_MSG_LENGTH 20
+#define USBMUX_INIT_TYPE   0x00000000
+#define USBMUX_INIT_LENGTH 0x00000014
+#define USBMUX_INIT_MAJOR  0x00000001
+#define USBMUX_INIT_MINOR  0x00000000
 
-#define AMD_VERSION_1 0x00000006
-#define AMD_VERSION_2 0x00000060
+
+
+#define USBMUX_TCP_SYN    0x02
+#define USBMUX_TCP_ACK    0x10
+#define USBMUX_TCP_SYNACK 0x12
+#define USBMUX_TCP_RST    0x04
+
+static const value_string packettypenames[] = {
+        { USBMUX_INIT_TYPE, "Init packet" },
+        { USBMUX_TCP_TYPE, "Tcp packet" }
+};
+
+static const value_string tcp_flags[] = {
+        {USBMUX_TCP_SYN, "SYN"},
+        {USBMUX_TCP_RST, "RST"},
+        {USBMUX_TCP_ACK, "ACK"},
+        {USBMUX_TCP_SYNACK, "SYN/ACK"},
+        {0, NULL}
+};
 
 
 void
-proto_register_amd(void)
+proto_register_usbmux(void)
 {
 
     static hf_register_info hf[] = {
-	{ &hf_amd_init_ret,
-	  { "Init message return value", "amd.init_ret",
-	  FT_UINT32, BASE_HEX,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_version,
-	  { "AMD Protocol Version", "amd.version",
-	  FT_UINT32, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_packet_length,
-	  { "Packet Length", "amd.packet_length",
-	  FT_UINT32, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_session_id,
-	  { "Session ID", "amd.session_id",
-	  FT_UINT32, BASE_HEX,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_self_count,
-	  { "Self Count", "amd.self_count",
-	  FT_UINT32, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_other_count,
-	  { "Other Count", "amd.other_count",
-	  FT_UINT32, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_operation,
-	  { "Operation", "amd.operation",
-	  FT_UINT32, BASE_HEX,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_packet_length2,
-	  { "Packet Length", "amd.packet_length2",
-	  FT_UINT32, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_mode,
-	  { "Mode", "amd.mode",
-	  FT_UINT16, BASE_HEX,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	},
-	{ &hf_amd_payload_length,
-	  { "Payload Length", "amd.payload_length",
-	  FT_UINT16, BASE_DEC,
-	  NULL, 0x0,
-	  NULL, HFILL }
-	}
+        { &hf_usbmux_init_ret,
+        { "Init message return value", "usbmux.init_ret",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_msg_type,
+        { "USBMUX message type", "usbmux.type",
+        FT_UINT32, BASE_HEX,
+        VALS(packettypenames), 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_packet_length,
+        { "Packet Length", "usbmux.packet_length",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_from_port,
+        { "From Port", "usbmux.from_port",
+        FT_UINT16, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_to_port,
+        { "To Port", "usbmux.to_port",
+        FT_UINT16, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_self_count,
+        { "Self Count", "usbmux.self_count",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_other_count,
+        { "Other Count", "usbmux.other_count",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_offset,
+        { "Offset", "usbmux.offset",
+        FT_UINT8, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_flag,
+        { "TCP Flag", "usbmux.flag",
+        FT_UINT8, BASE_HEX,
+        VALS(tcp_flags), 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_window,
+        { "Window", "usbmux.window",
+        FT_UINT16, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_unknown,
+        { "Unknown", "usbmux.unknown",
+        FT_UINT16, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_usbmux_packet_length2,
+        { "Packet Length", "usbmux.packet_length2",
+        FT_UINT16, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        }
     };
 
     static gint *ett[] = {
-		&ett_amd
+                &ett_usbmux
     };
 
-	proto_amd = proto_register_protocol (
-			"Apple Mobile Device Protocol",	/* name */
-			"Apple Mobile Device",		/* short name */
-			"amd"		/* abbrev */
-			);
+        proto_usbmux = proto_register_protocol (
+                        "USB Mux Protocol used for Apples mobile devices",	/* name */
+                        "USB Mux Protocol",		/* short name */
+                        "usbmux"		/* abbrev */
+                        );
 
-	proto_register_field_array(proto_amd, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
+        proto_register_field_array(proto_usbmux, hf, array_length(hf));
+        proto_register_subtree_array(ett, array_length(ett));
 
 }
 
 void
-proto_reg_handoff_amd(void)
+proto_reg_handoff_usbmux(void)
 {
-	static gboolean initialized = FALSE;
+        static gboolean initialized = FALSE;
 
-	if (!initialized) {
-		amd_handle = create_dissector_handle(dissect_amd, proto_amd);
-		dissector_add("usb.bulk", IF_CLASS_VENDOR_SPECIFIC, amd_handle);
-		initialized = TRUE;
+        if (!initialized) {
+                usbmux_handle = create_dissector_handle(dissect_usbmux, proto_usbmux);
+                dissector_add("usb.bulk", IF_CLASS_VENDOR_SPECIFIC, usbmux_handle);
+                initialized = TRUE;
 
-		ssl_handle = find_dissector("ssl");
-	}
+                ssl_handle = find_dissector("ssl");
+        }
 }
 
-int is_amd_init_msg(tvbuff_t *tvb)
+int is_usbmux_init_msg(tvbuff_t *tvb)
 {
-	int ret = 0;
+        int ret = 0;
 
-	/* First check if size is sufficient */
-	guint length = tvb_length(tvb);
+        /* First check if size is sufficient */
+        guint length = tvb_length(tvb);
 
-	if (length == AMD_INIT_MSG_LENGTH) {
-		/* Check if this is an initialization msg */
-		gint32 msg1 = 0;
-		gint32 msg2 = 0;
+        if (length == USBMUX_INIT_MSG_LENGTH) {
+                /* Check if this is an initialization msg */
+                gint32 type = 0;
+                gint32 length = 0;
+                gint32 major = 0;
+                gint32 minor = 0;
 
-		msg1 = tvb_get_ntohl(tvb, 4);
-		msg2 = tvb_get_ntohl(tvb, 8);
+                type   = tvb_get_ntohl(tvb, 0);
+                length = tvb_get_ntohl(tvb, 4);
+                major  = tvb_get_ntohl(tvb, 8);
+                minor  = tvb_get_ntohl(tvb, 16);
 
-		if ( AMD_INIT_MSG1 == msg1 &&
-			 AMD_INIT_MSG2 == msg2 )
-			ret = 1;
-	}
-	return ret;
+                if ( USBMUX_INIT_TYPE   == type   &&
+                     USBMUX_INIT_LENGTH == length &&
+                     USBMUX_INIT_MAJOR  == major  &&
+                     USBMUX_INIT_MINOR  == minor  )
+                        ret = 1;
+        }
+        return ret;
 }
 
-int is_amd_packet(tvbuff_t *tvb)
+int is_usbmux_packet(tvbuff_t *tvb)
 {
-	int ret = 0;
+        int ret = 0;
 
-	/* First check if size is sufficient */
-	guint length = tvb_length(tvb);
+        /* First check if size is sufficient */
+        guint length = tvb_length(tvb);
 
-	if (length >= AMD_SHORT_HEADER_LENGTH) {
+        if (length >= USBMUX_HEADER_LENGTH) {
 
-		guint32 version =  tvb_get_ntohl(tvb, 0);
+                guint32 type  =  tvb_get_ntohl(tvb, 0);
 
-		/* if packet begins with 00 00 00 00 60 we assume it is an AMD packet */
-		if ( (version == AMD_VERSION_1) || (version == AMD_VERSION_2) )
-			ret = 1;
-	}
-	return ret;
+                if ( USBMUX_TCP_TYPE == type )
+                        ret = 1;
+        }
+        return ret;
 }
 
 static void
-dissect_amd(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
+dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
-	//First check if we are really in the Apple Mobile Device Protocol
-	
-	guint length = tvb_length(tvb);
+        /* Treat init msg */
+        if ( is_usbmux_init_msg(tvb) ) {
 
-	/* Treat init msg */
-	if ( is_amd_init_msg(tvb) ) {
+                if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
+                        col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+                }
+                /* Clear out stuff in the info column */
+                if (check_col(pinfo->cinfo,COL_INFO)) {
+                        col_clear(pinfo->cinfo,COL_INFO);
+                }
 
-		if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
-			col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
-		}
-		/* Clear out stuff in the info column */
-		if (check_col(pinfo->cinfo,COL_INFO)) {
-			col_clear(pinfo->cinfo,COL_INFO);
-		}
+                /* we are being asked for details */
+                if (tree) {
+                        //try only with short header
+                        proto_item *ti = NULL;
+                        proto_tree *usbmux_tree = NULL;
 
-		/* we are being asked for details */
-		if (tree) {
-			//try only with short header
-			proto_item *ti = NULL;
-			proto_tree *amd_tree = NULL;
+                        ti = proto_tree_add_item(tree, proto_usbmux, tvb, 0, USBMUX_INIT_MSG_LENGTH, FALSE);
+                        usbmux_tree = proto_item_add_subtree(ti, ett_usbmux);
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_init_ret, tvb, 16, 4, FALSE);
 
-			ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_INIT_MSG_LENGTH, FALSE);
-			amd_tree = proto_item_add_subtree(ti, ett_amd);
-			proto_tree_add_item(amd_tree, hf_amd_init_ret, tvb, 16, 4, FALSE);
+                }
+        }
 
-		}
-	}
+        /* Treat packet */
+        if ( is_usbmux_packet(tvb) ) {
 
-	/* Treat packet */
-	if ( is_amd_packet(tvb) ) {
+                if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
+                        col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+                }
+                /* Clear out stuff in the info column */
+                if (check_col(pinfo->cinfo,COL_INFO)) {
+                        col_clear(pinfo->cinfo,COL_INFO);
+                }
 
-		if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
-			col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
-		}
-		/* Clear out stuff in the info column */
-		if (check_col(pinfo->cinfo,COL_INFO)) {
-			col_clear(pinfo->cinfo,COL_INFO);
-		}
+                /* we are being asked for details */
+                if (tree) {
+                        //try only with short header
+                        proto_item *ti = NULL;
+                        proto_tree *usbmux_tree = NULL;
 
-		/* we are being asked for details */
-		if (tree) {
-			//try only with short header
-			proto_item *ti = NULL;
-			proto_tree *amd_tree = NULL;
+                        tvbuff_t *next_tvb;
+                        guint offset = 0;
+                        guint length = tvb_length(tvb);
 
-			tvbuff_t *next_tvb;
+                        ti = proto_tree_add_item(tree, proto_usbmux, tvb, 0, USBMUX_HEADER_LENGTH, FALSE);
+                        usbmux_tree = proto_item_add_subtree(ti, ett_usbmux);
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_msg_type, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_packet_length, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_from_port, tvb, offset, 2, FALSE);
+                        offset += 2;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_to_port, tvb, offset, 2, FALSE);
+                        offset += 2;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_self_count, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_other_count, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_offset, tvb, offset, 1, FALSE);
+                        offset += 1;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_flag, tvb, offset, 1, FALSE);
+                        offset += 1;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_window, tvb, offset, 2, FALSE);
+                        offset += 2;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_unknown, tvb, offset, 2, FALSE);
+                        offset += 2;
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_packet_length2, tvb, offset, 2, FALSE);
+                        offset += 2;
 
-			guint offset = 0;
-			guint32 flen;
-			guint32 flen2; //will be used to determine if we are in a short or long header
 
-			flen  =  tvb_get_ntohl(tvb,  4);
-			flen2 =  tvb_get_ntohl(tvb, 24);
+                        next_tvb = tvb_new_subset(tvb, offset, -1, length);
 
-			if (0 == flen2 || AMD_SHORT_HEADER_LENGTH == flen)
-				ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_SHORT_HEADER_LENGTH, FALSE); //long header
-			else 
-				ti = proto_tree_add_item(tree, proto_amd, tvb, 0, AMD_LONG_HEADER_LENGTH, FALSE); //short header
-
-			amd_tree = proto_item_add_subtree(ti, ett_amd);
-			proto_tree_add_item(amd_tree, hf_amd_version, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_packet_length, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_session_id, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_self_count, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_other_count, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_operation, tvb, offset, 4, FALSE);
-			offset += 4;
-			proto_tree_add_item(amd_tree, hf_amd_packet_length2, tvb, offset, 4, FALSE);
-			offset += 4;
-			
-			if (!(0 == flen2 || AMD_SHORT_HEADER_LENGTH == flen)){
-
-				proto_tree_add_item(amd_tree, hf_amd_mode, tvb, offset, 2, FALSE);
-				offset += 2;
-				proto_tree_add_item(amd_tree, hf_amd_payload_length, tvb, offset, 2, FALSE);
-				offset += 2;
-			}
-
-			next_tvb = tvb_new_subset(tvb, offset, -1, length);
-
-			if (ssl_handle) {
-				guint next_length = tvb_length(next_tvb);
-
-				if (next_length > 0)
-					call_dissector(ssl_handle, next_tvb, pinfo, tree);
-			}
-		}
-	}
+// TODO : need to handle each coupke of from and to port as a separate conversation associated to a dissector
+//                         if (ssl_handle) {
+//                                 guint next_length = tvb_length(next_tvb);
+// 
+//                                 //call ssl dissector only if there is data left
+//                                 if (next_length > 0)
+//                                         call_dissector(ssl_handle, next_tvb, pinfo, tree);
+//                         }
+                }
+        }
 }
