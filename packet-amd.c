@@ -36,11 +36,15 @@ void proto_register_usbmux();
 void proto_reg_handoff_usbmux();
 static void dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree);
 
+void proto_register_afc();
+void proto_reg_handoff_afc();
+static void dissect_afc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree);
+
 static int hf_usbmux_init_ret = -1;
 static int hf_usbmux_msg_type = -1;
 static int hf_usbmux_packet_length = -1;
-static int hf_usbmux_from_port = -1;
-static int hf_usbmux_to_port = -1;
+static int hf_usbmux_src_port = -1;
+static int hf_usbmux_dst_port = -1;
 static int hf_usbmux_self_count = -1;
 static int hf_usbmux_other_count = -1;
 static int hf_usbmux_offset = -1;
@@ -48,12 +52,24 @@ static int hf_usbmux_flag = -1;
 static int hf_usbmux_window = -1;
 static int hf_usbmux_unknown = -1;
 static int hf_usbmux_packet_length2 = -1;
-
+static int hf_afc_header1 = -1;
+static int hf_afc_header2 = -1;
+static int hf_afc_entire_length = -1;
+static int hf_afc_unknown1 = -1;
+static int hf_afc_this_length = -1;
+static int hf_afc_unknown2 = -1;
+static int hf_afc_packet_num = -1;
+static int hf_afc_unknown3 = -1;
+static int hf_afc_operation = -1;
+static int hf_afc_unknown4 = -1;
 
 
 static int proto_usbmux = -1;
 static dissector_handle_t usbmux_handle;
 static gint ett_usbmux = -1;
+static int proto_afc = -1;
+static dissector_handle_t afc_handle;
+static gint ett_afc = -1;
 
 static dissector_handle_t ssl_handle;
 
@@ -72,6 +88,21 @@ static dissector_handle_t ssl_handle;
 #define USBMUX_TCP_ACK    0x10
 #define USBMUX_TCP_SYNACK 0x12
 #define USBMUX_TCP_RST    0x04
+
+#define AFC_PACKET_LENGTH       40
+
+#define AFC_ERROR               0x00000001
+#define AFC_SUCCESS_RESPONSE    0x00000002
+#define AFC_LIST_DIR            0x00000003
+#define AFC_DELETE              0x00000008
+#define AFC_GET_INFO            0x0000000a
+#define AFC_GET_DEVINFO         0x0000000b
+#define AFC_FILE_OPEN           0x0000000d
+#define AFC_FILE_HANDLE         0x0000000e
+#define AFC_READ                0x0000000f
+#define AFC_WRITE               0x00000010
+#define AFC_FILE_CLOSE          0x00000014
+#define AFC_RENAME              0x00000018
 
 static const value_string packettypenames[] = {
         { USBMUX_INIT_TYPE, "Init packet" },
@@ -110,14 +141,14 @@ proto_register_usbmux(void)
         NULL, 0x0,
         NULL, HFILL }
         },
-        { &hf_usbmux_from_port,
-        { "From Port", "usbmux.from_port",
+        { &hf_usbmux_src_port,
+        { "From Port", "usbmux.src_port",
         FT_UINT16, BASE_DEC,
         NULL, 0x0,
         NULL, HFILL }
         },
-        { &hf_usbmux_to_port,
-        { "To Port", "usbmux.to_port",
+        { &hf_usbmux_dst_port,
+        { "To Port", "usbmux.dst_port",
         FT_UINT16, BASE_DEC,
         NULL, 0x0,
         NULL, HFILL }
@@ -194,6 +225,119 @@ proto_reg_handoff_usbmux(void)
                 ssl_handle = find_dissector("ssl");
         }
 }
+
+
+static const value_string operations[] = {
+        {AFC_ERROR, "Error"},
+        {AFC_SUCCESS_RESPONSE, "Success"},
+        {AFC_LIST_DIR, "List Dir"},
+        {AFC_DELETE, "Delete"},
+        {AFC_GET_INFO, "Get Info"},
+        {AFC_GET_DEVINFO, "Get Dev Info"},
+        {AFC_FILE_OPEN, "Open File"},
+        {AFC_FILE_HANDLE, "File Handle"},
+        {AFC_READ, "Read"},
+        {AFC_WRITE, "Write"},
+        {AFC_FILE_CLOSE, "Close File"},
+        {AFC_RENAME, "Rename"},
+        {0, NULL}
+};
+
+
+void
+proto_register_afc(void)
+{
+
+    static hf_register_info hf[] = {
+        { &hf_afc_header1,
+        { "First Header", "afc.header1",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_header2,
+        { "Second Header", "afc.header2",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_entire_length,
+        { "Entire Length", "afc.entire_length",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_unknown1,
+        { "Unknown 1", "afc.unknown1",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_this_length,
+        { "This Length", "afc.this_length",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_unknown2,
+        { "Unknown 2", "afc.unknown2",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_packet_num,
+        { "Packet Number", "afc.packet_num",
+        FT_UINT32, BASE_DEC,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_unknown3,
+        { "Unknown 3", "afc.unknown3",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_operation,
+        { "Operation", "afc.operation",
+        FT_UINT32, BASE_HEX,
+        VALS(operations), 0x0,
+        NULL, HFILL }
+        },
+        { &hf_afc_unknown4,
+        { "Unknown 4", "afc.unknown4",
+        FT_UINT32, BASE_HEX,
+        NULL, 0x0,
+        NULL, HFILL }
+        }
+    };
+
+    static gint *ett[] = {
+                &ett_afc
+    };
+
+        proto_afc = proto_register_protocol (
+                        "AFC Protocol",	/* name */
+                        "AFC Protocol",	/* short name */
+                        "afc"		/* abbrev */
+                        );
+
+        proto_register_field_array(proto_afc, hf, array_length(hf));
+        proto_register_subtree_array(ett, array_length(ett));
+
+}
+
+void
+proto_reg_handoff_afc(void)
+{
+        static gboolean initialized = FALSE;
+
+        if (!initialized) {
+                afc_handle = create_dissector_handle(dissect_afc, proto_afc);
+//                dissector_add("usb.bulk", IF_CLASS_VENDOR_SPECIFIC, afc_handle);
+                initialized = TRUE;
+        }
+}
+
 
 int is_usbmux_init_msg(tvbuff_t *tvb)
 {
@@ -294,9 +438,9 @@ dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
                         offset += 4;
                         proto_tree_add_item(usbmux_tree, hf_usbmux_packet_length, tvb, offset, 4, FALSE);
                         offset += 4;
-                        proto_tree_add_item(usbmux_tree, hf_usbmux_from_port, tvb, offset, 2, FALSE);
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_src_port, tvb, offset, 2, FALSE);
                         offset += 2;
-                        proto_tree_add_item(usbmux_tree, hf_usbmux_to_port, tvb, offset, 2, FALSE);
+                        proto_tree_add_item(usbmux_tree, hf_usbmux_dst_port, tvb, offset, 2, FALSE);
                         offset += 2;
                         proto_tree_add_item(usbmux_tree, hf_usbmux_self_count, tvb, offset, 4, FALSE);
                         offset += 4;
@@ -316,7 +460,7 @@ dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 
                         next_tvb = tvb_new_subset(tvb, offset, -1, length);
 
-// TODO : need to handle each coupke of from and to port as a separate conversation associated to a dissector
+// TODO : need to handle each couple of from and to port as a separate conversation associated to a dissector
 //                         if (ssl_handle) {
 //                                 guint next_length = tvb_length(next_tvb);
 // 
@@ -324,6 +468,57 @@ dissect_usbmux(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 //                                 if (next_length > 0)
 //                                         call_dissector(ssl_handle, next_tvb, pinfo, tree);
 //                         }
+                }
+        }
+}
+
+static void
+dissect_afc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
+{
+        if (check_col(pinfo->cinfo, COL_PROTOCOL)) {
+                col_set_str(pinfo->cinfo, COL_PROTOCOL, "Apple Mobile Device");
+        }
+        /* Clear out stuff in the info column */
+        if (check_col(pinfo->cinfo,COL_INFO)) {
+                col_clear(pinfo->cinfo,COL_INFO);
+        }
+        
+        /* we are being asked for details */
+        if (tree) {
+                //try only with short header
+                proto_item *ti = NULL;
+                proto_tree *afc_tree = NULL;
+        
+                tvbuff_t *next_tvb;
+                guint offset = 0;
+                guint length = tvb_length(tvb);
+                
+                if (AFC_PACKET_LENGTH <= length) {
+
+                        ti = proto_tree_add_item(tree, proto_afc, tvb, 0, AFC_PACKET_LENGTH, FALSE);
+                        afc_tree = proto_item_add_subtree(ti, ett_afc);
+                        proto_tree_add_item(afc_tree, hf_afc_header1, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_header2, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_entire_length, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_unknown1, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_this_length, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_unknown2, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_packet_num, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_unknown3, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_operation, tvb, offset, 4, FALSE);
+                        offset += 4;
+                        proto_tree_add_item(afc_tree, hf_afc_unknown4, tvb, offset, 4, FALSE);
+                        offset += 4;
+
+                        next_tvb = tvb_new_subset(tvb, offset, -1, length);
                 }
         }
 }
